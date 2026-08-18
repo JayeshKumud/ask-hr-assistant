@@ -1,0 +1,67 @@
+# -------------------------
+# Python
+# -------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.env/
+venv/
+.venv/
+ENV/
+env/
+
+# -------------------------
+# Conda
+# -------------------------
+conda-meta/
+*.conda
+*.lock
+
+# -------------------------
+# Project-specific
+# -------------------------
+# Local secrets
+.env
+
+# Cache / embeddings / FAISS index
+data/
+vector_store/
+faiss_index/
+*.npy
+*.npz
+
+# Logs
+logs/
+*.log
+
+# Streamlit
+.streamlit/
+
+# FastAPI / Uvicorn
+*.db
+*.sqlite3
+
+# -------------------------
+# OS / Editor
+# -------------------------
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/
+
+# PyCharm
+.idea/
+
+# -------------------------
+# Node (if Streamlit extensions)
+# -------------------------
+node_modules/

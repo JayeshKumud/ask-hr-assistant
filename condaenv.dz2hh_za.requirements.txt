@@ -1,0 +1,13 @@
+langchain
+langchain-community
+langchain-chroma
+langchain-groq
+langchain-huggingface
+chromadb
+unstructured
+streamlit
+python-dotenv
+sentence-transformers
+pydantic
+requests
+uuid
