@@ -126,3 +126,27 @@ class VectorStoreManager:
         return self.store.as_retriever(
             search_kwargs={"k": settings.top_k}
         )
+
+    def get_all_documents(self) -> list[Document]:
+        """
+        Reconstruct every chunk currently stored in the collection as a
+        list of LangChain Documents.
+
+        Unlike Chroma, BM25 isn't a persisted index — BM25Retriever needs
+        the full text corpus in memory to build its keyword index. Rather
+        than maintaining a separate copy of the chunks that could drift
+        out of sync with what's actually in Chroma (e.g. after a reset +
+        re-ingest), this reads the current corpus directly back out of
+        Chroma on demand, so BM25 always reflects whatever is actually
+        stored right now.
+
+        Returns:
+            list[Document]:
+                Every chunk in the collection, with its original
+                page_content and metadata restored.
+        """
+        raw = self.store.get(include=["documents", "metadatas"])
+        return [
+            Document(page_content=text, metadata=metadata or {})
+            for text, metadata in zip(raw["documents"], raw["metadatas"])
+        ]

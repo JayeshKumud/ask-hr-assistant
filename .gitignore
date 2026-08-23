@@ -65,3 +65,4 @@ Thumbs.db
 # Node (if Streamlit extensions)
 # -------------------------
 node_modules/
+/resources/vectorstore/
