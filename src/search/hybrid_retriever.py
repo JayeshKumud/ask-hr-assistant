@@ -29,10 +29,26 @@ from core.config import settings
 from processing.vector_store import VectorStoreManager
 
 
-def build_hybrid_retriever(vsm: VectorStoreManager) -> EnsembleRetriever:
+from typing import Optional
+
+from langchain_classic.retrievers import EnsembleRetriever
+from langchain_community.retrievers import BM25Retriever
+
+from core.config import settings
+from processing.vector_store import VectorStoreManager
+
+
+def build_hybrid_retriever(vsm: VectorStoreManager, k: Optional[int] = None) -> EnsembleRetriever:
     """
     Builds an EnsembleRetriever combining BM25 and vector search over
     whatever is currently stored in the vector store.
+
+    Args:
+        vsm: The vector store manager to retrieve from.
+        k: Optional override for how many documents each retriever
+            returns. Defaults to settings.top_k. search/reranker.py
+            passes settings.rerank_candidate_k here instead, to fetch a
+            wider candidate pool for the cross-encoder to narrow down.
 
     BM25Retriever is rebuilt from vsm.get_all_documents() each time this
     is called, rather than persisted — BM25 has no on-disk index of its
@@ -41,12 +57,13 @@ def build_hybrid_retriever(vsm: VectorStoreManager) -> EnsembleRetriever:
     it per query is cheap; if the corpus grows much larger, this would be
     worth caching instead of rebuilding every call.
     """
+    k = k or settings.top_k
     documents = vsm.get_all_documents()
 
     bm25_retriever = BM25Retriever.from_documents(documents)
-    bm25_retriever.k = settings.top_k
+    bm25_retriever.k = k
 
-    vector_retriever = vsm.as_retriever()
+    vector_retriever = vsm.as_retriever(k=k)
 
     return EnsembleRetriever(
         retrievers=[bm25_retriever, vector_retriever],

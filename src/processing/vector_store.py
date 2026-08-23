@@ -112,19 +112,25 @@ class VectorStoreManager:
 
         return ids
 
-    def as_retriever(self) -> Any:
+    def as_retriever(self, k: Optional[int] = None) -> Any:
         """
         Create a LangChain retriever backed by the Chroma store.
 
-        The number of documents returned during similarity search is
-        controlled by ``settings.top_k``.
+        Args:
+            k:
+                Optional override for how many documents to return.
+                Defaults to ``settings.top_k``. The re-ranking pipeline
+                (search/reranker.py) passes a wider value here — it needs
+                a bigger candidate pool to narrow down from, since
+                re-ranking a pool the same size as the final result
+                accomplishes nothing.
 
         Returns:
             Any:
                 A LangChain retriever configured for semantic search.
         """
         return self.store.as_retriever(
-            search_kwargs={"k": settings.top_k}
+            search_kwargs={"k": k or settings.top_k}
         )
 
     def get_all_documents(self) -> list[Document]:

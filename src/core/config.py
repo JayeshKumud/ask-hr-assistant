@@ -77,5 +77,15 @@ class Settings:
     bm25_weight: float = float(os.getenv("BM25_WEIGHT", "0.5"))
     vector_weight: float = float(os.getenv("VECTOR_WEIGHT", "0.5"))
 
+    # --- Re-ranking ---
+    reranker_model: str = os.getenv(
+        "RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    )
+    # How many candidates hybrid retrieval fetches BEFORE the cross-encoder
+    # re-ranks and narrows them down to top_k for the final prompt. This
+    # must be wider than top_k, or there's nothing for the re-ranker to
+    # actually narrow — re-ranking 5 candidates down to 5 does nothing.
+    rerank_candidate_k: int = int(os.getenv("RERANK_CANDIDATE_K", "15"))
+
 
 settings = Settings()

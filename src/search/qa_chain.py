@@ -10,14 +10,22 @@ from search.hybrid_retriever import build_hybrid_retriever
 from search.prompts import PROMPT, EXAMPLE_PROMPT
 
 
+from core.config import settings
+from processing.vector_store import VectorStoreManager
+from search.citations import Citation, extract_citations
+from search.reranker import build_reranking_retriever
+from search.prompts import PROMPT, EXAMPLE_PROMPT
+
+
 def build_qa_chain(llm, vsm: VectorStoreManager) -> RetrievalQAWithSourcesChain:
     """
     Builds the retrieval-augmented QA chain from an LLM and a
     VectorStoreManager.
 
-    Takes the manager (not the raw Chroma store) because the hybrid
-    retriever needs get_all_documents() from it to build BM25's index,
-    in addition to the vector search it already provided.
+    The retriever is the full Phase 3 + Phase 4 pipeline: hybrid
+    (BM25 + vector) retrieval fetches a wide candidate pool, then a
+    cross-encoder re-ranks and narrows it down to the most relevant
+    settings.top_k chunks before they reach the LLM.
     """
     qa_chain = load_qa_with_sources_chain(
         llm,
@@ -27,7 +35,7 @@ def build_qa_chain(llm, vsm: VectorStoreManager) -> RetrievalQAWithSourcesChain:
     )
     return RetrievalQAWithSourcesChain(
         combine_documents_chain=qa_chain,
-        retriever=build_hybrid_retriever(vsm),
+        retriever=build_reranking_retriever(vsm),
         reduce_k_below_max_tokens=True,
         max_tokens_limit=settings.max_tokens_limit,
         return_source_documents=True,
