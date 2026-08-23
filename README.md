@@ -1,56 +1,67 @@
-# rag-research-iq
+# NexaCore Company Policy Assistant
 
-A Retrieval-Augmented Generation (RAG) research assistant that scrapes real-estate
-news articles from URLs, indexes them in a local vector store, and answers
-questions about their content with sourced citations — using Groq-hosted LLMs,
-HuggingFace embeddings, and Chroma.
+A Retrieval-Augmented Generation (RAG) system that answers employee
+questions about company leave and visa policy — grounded strictly in
+your actual policy documents, with page-level citations, and an explicit
+refusal when the documents don't support a confident answer rather than
+guessing.
 
-Runs as a Streamlit app.
+Originally built as a URL-scraping real-estate research tool
+(`rag-research-iq`); the retrieval/generation architecture was kept, the
+domain and ingestion source were replaced.
 
-## Features
+## What it does
 
-- **Ingest** any set of article URLs into a local vector database
-- **Ask questions** in natural language and get answers grounded in the
-  ingested articles, with source URLs attached
-- Runs on Groq's fast open-weight models (currently `openai/gpt-oss-120b`)
-- No cloud vector DB required — Chroma persists to disk locally under
-  `resources/vectorstore/`
+- **Ingests PDF policy documents** (leave policy, visa/immigration
+  policy, etc.) from a local folder — no web scraping, no external URLs.
+- **Answers questions in natural language**, grounded only in what's
+  actually in those documents.
+- **Hybrid retrieval**: combines BM25 keyword search with vector
+  (semantic) search, so both exact terms ("Form I-129") and paraphrased
+  questions ("what if I'm sick?") are handled well.
+- **Cross-encoder re-ranking**: a second, more precise pass narrows a
+  wide retrieval candidate pool down to the best few chunks before they
+  reach the LLM.
+- **Page-level citations**: every answer shows exactly which document
+  and page it came from, plus the actual backing text — not just a
+  repeated filename.
+- **Citation enforcement**: a second LLM call checks whether the
+  generated answer is actually supported by the retrieved excerpts, and
+  explicitly refuses ("I don't have enough information...") rather than
+  returning an unsupported or hallucinated answer.
+- **Versioned prompts**: all prompt text lives in a single YAML config
+  file, not scattered across Python source.
+- **Offline faithfulness evaluation**: a curated 20-question golden set
+  (plus 5 out-of-scope questions) scored automatically via DeepEval,
+  checking both answer faithfulness and correct-refusal behavior.
 
 ## Quick start
 
-See **[SETUP.md](SETUP.md)** for full setup instructions. The short version:
+See **[SETUP.md](SETUP.md)** for full instructions. Short version:
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate        # Windows (PowerShell/cmd)
+.venv\Scripts\activate        # Windows
 # source .venv/bin/activate   # macOS/Linux
 
 pip install -e .
-# add your GROQ_API_KEY to a .env file (see SETUP.md)
+copy .env.example .env        # then add your GROQ_API_KEY
 
 streamlit run src/gui/main.py
 ```
 
-## Try it
-
-The project ships with two sample URLs you can use to test ingestion and
-querying end-to-end:
-
-- https://www.cnbc.com/2024/12/21/how-the-federal-reserves-rate-policy-affects-mortgages.html
-- https://www.cnbc.com/2024/12/20/why-mortgage-rates-jumped-despite-fed-interest-rate-cut.html
-
-Paste those into the app's sidebar URL fields, click **Process URLs**, then
-ask something like:
-
-> Tell me what was the 30 year fixed mortgage rate along with the date?
+In the app: click **Index Policy Documents** in the sidebar first, then
+ask a question in the text box.
 
 ## Documentation
 
 | Doc | Covers |
 |---|---|
-| [SETUP.md](SETUP.md) | venv setup, API keys, running the app, running tests, troubleshooting |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Module layout, what each package is responsible for, key design decisions |
-| [WORKFLOW.md](WORKFLOW.md) | Step-by-step data flow for ingestion and for answering a query |
+| [SETUP.md](SETUP.md) | Environment setup, API keys, running the app, running the evaluation script, troubleshooting |
+| [ARCHITECTURE.md](resources/docs/ARCHITECTURE.md) | Every module's purpose and responsibilities, key design decisions |
+| [WORKFLOW.md](resources/docs/WORKFLOW.md) | Step-by-step execution flow for ingestion and for answering a query |
+| [HYBRID_SEARCH.md](HYBRID_SEARCH.md) | How BM25 + vector hybrid retrieval works, why it's needed |
+| [RE_RANKER.md](RE_RANKER.md) | How cross-encoder re-ranking works, why hybrid retrieval's ranking alone isn't enough |
 
 ## Project layout
 
@@ -58,21 +69,50 @@ ask something like:
 rag-research-iq/
 ├── pyproject.toml
 ├── .env / .env.example
+├── config/
+│   └── prompts.yaml            # versioned prompt templates (source of truth)
 ├── src/
 │   ├── core/
-│   │   ├── config.py         # central settings (env-driven)
-│   │   └── pipeline.py       # RAGPipeline — orchestrates the whole flow
+│   │   ├── config.py           # central settings (env-driven, project-root-anchored)
+│   │   ├── pipeline.py         # RAGPipeline — orchestrates the whole flow
+│   │   └── prompt_registry.py  # loads config/prompts.yaml
 │   ├── ingestion/
-│   │   ├── url_loader.py     # loads raw docs from URLs
-│   │   └── text_splitter.py  # chunks documents
+│   │   ├── document_loader.py  # loads PDFs from resources/policies/
+│   │   └── text_splitter.py    # chunks documents, tracks chunk position
 │   ├── processing/
-│   │   ├── embeddings.py     # embedding function
-│   │   └── vector_store.py   # Chroma vector store management
+│   │   ├── embeddings.py       # embedding function factory
+│   │   └── vector_store.py     # Chroma vector store management
 │   ├── search/
-│   │   ├── prompts.py        # QA prompt templates
-│   │   └── qa_chain.py       # retrieval QA chain + generate_answer
+│   │   ├── prompts.py          # builds LangChain PromptTemplates from the YAML config
+│   │   ├── citations.py        # Citation dataclass + extraction
+│   │   ├── hybrid_retriever.py # BM25 + vector, combined via RRF
+│   │   ├── reranker.py         # cross-encoder re-ranking on top of hybrid retrieval
+│   │   ├── citation_enforcer.py# refuses unsupported answers
+│   │   └── qa_chain.py         # ties retrieval + generation + enforcement together
+│   ├── eval/
+│   │   ├── dataset_loader.py       # loads the golden question CSVs
+│   │   ├── groq_deepeval_llm.py    # adapts ChatGroq for DeepEval
+│   │   └── evaluate_faithfulness.py# offline faithfulness + refusal evaluation script
 │   └── gui/
-│       └── main.py            # Streamlit app — the entry point
-├── resources/vectorstore/    # persisted Chroma DB (not committed)
-└── tests/
+│       └── main.py             # Streamlit app — the entry point
+├── resources/
+│   ├── policies/                # source PDF policy documents
+│   ├── sample_questions/        # golden eval question sets (CSV)
+│   └── vectorstore/              # persisted Chroma DB (not committed)
+└── tests/                       # (in progress)
 ```
+
+## Status
+
+Built incrementally; current state:
+
+- ✅ PDF ingestion, chunking, vector storage
+- ✅ Page-level citations
+- ✅ Hybrid (BM25 + vector) retrieval
+- ✅ Cross-encoder re-ranking
+- ✅ Citation enforcement (refuses unsupported answers)
+- ✅ Versioned prompts (`config/prompts.yaml`)
+- ✅ Offline faithfulness evaluation script (DeepEval)
+- ⏳ CI pipeline wiring (fail build on quality regression) — not yet done
+- ⏳ Centralized structured logging — partial (individual modules log; no unified setup yet)
+- ⏳ Unit test suite — not yet built

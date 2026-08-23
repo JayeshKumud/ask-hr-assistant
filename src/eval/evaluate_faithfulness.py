@@ -1,51 +1,177 @@
-"""
-Eval: offline faithfulness evaluation against the golden question sets.
+# =============================================================================
+# MODULE: evaluate_faithfulness.py
+# =============================================================================
+#
+# PURPOSE:
+# -------
+# Offline evaluation of the RAG pipeline against predefined golden question
+# sets.
+#
+# This module evaluates two important aspects of the RAG system:
+#
+# 1. FAITHFULNESS
+#    - Tests questions that SHOULD be answerable from the policy documents.
+#    - Runs each question through the real RAG pipeline.
+#    - Uses DeepEval's FaithfulnessMetric to determine whether the generated
+#      answer is actually supported by the retrieved document chunks.
+#
+# 2. REFUSAL CORRECTNESS
+#    - Tests questions that are OUTSIDE the available policy documents.
+#    - Verifies that the RAG system refuses to answer instead of hallucinating
+#      information from its general knowledge.
+#
+# WHY THIS IS DIFFERENT FROM citation_enforcer.py:
+# -------------------------------------------------
+# citation_enforcer.py is a LIVE runtime guardrail.
+#
+# It executes for every real user query and prevents unsupported answers
+# from being returned to the user.
+#
+# This module is an OFFLINE evaluation framework.
+#
+# It runs a predefined collection of test questions and produces measurable
+# quality scores. It is intended to be executed during CI/CD to detect
+# regressions before new code is released.
+#
+#
+# TEST DATA:
+# ----------
+# Positive questions:
+#   resources/sample_questions/positive_rag_questions.csv
+#
+#   Contains questions that the policy documents should be able to answer.
+#
+# Negative questions:
+#   resources/sample_questions/negative_out_of_document_questions.csv
+#
+#   Contains questions that the policy documents do NOT cover.
+#
+#
+# CI/CD BEHAVIOUR:
+# ----------------
+# The script returns:
+#
+#   Exit code 0 -> Evaluation PASSED
+#   Exit code 1 -> Evaluation FAILED
+#
+# Therefore, a CI/CD pipeline can use the exit code to fail the build when
+# the RAG quality falls below the configured thresholds.
+#
+#
+# USAGE:
+# ------
+# python -m eval.evaluate_faithfulness
+#
+# =============================================================================
 
-Two things get measured, against the CSVs in resources/sample_questions/:
 
-1. FAITHFULNESS on positive_rag_questions.csv (20 questions the policy
-   documents should answer): for each question, runs it through the real
-   pipeline, then scores whether the generated answer's claims are
-   actually supported by the retrieved chunks, via DeepEval's
-   FaithfulnessMetric. This is a different (more rigorous, LLM-graded)
-   check than Phase 5's citation_enforcer.py — that module is a live,
-   single-pass guardrail on every real query; this script is an offline,
-   scored evaluation across a whole curated test set, meant to be run
-   in CI (Phase 7) to catch regressions before they reach users.
+# -----------------------------------------------------------------------------
+# STANDARD LIBRARY IMPORTS
+# -----------------------------------------------------------------------------
 
-2. REFUSAL CORRECTNESS on negative_out_of_document_questions.csv (5
-   questions the documents do NOT cover): for each, runs it through the
-   pipeline and checks whether the system correctly refused (matches
-   citation_enforcer's refusal messages) rather than hallucinating an
-   answer from outside knowledge.
-
-Exits with a non-zero status code if either score falls below its
-configured threshold — this is what will make a CI pipeline (Phase 7)
-fail the build on a quality regression, not just print a report.
-
-Usage:
-    python -m eval.evaluate_faithfulness
-"""
+# Provides logging functionality so that evaluation progress and results
+# can be written to the application logs.
 import logging
+
+# Provides access to the process exit status.
+# Used at the end of the script to return 0 for PASS and 1 for FAIL.
 import sys
+
+# dataclass is used to create lightweight result objects for storing
+# evaluation results.
 from dataclasses import dataclass
+
+# List is used for type annotations.
 from typing import List
 
+
+# -----------------------------------------------------------------------------
+# THIRD-PARTY IMPORTS
+# -----------------------------------------------------------------------------
+
+# DeepEval metric used to evaluate whether the generated answer is
+# factually supported by the retrieved context.
 from deepeval.metrics import FaithfulnessMetric
+
+# DeepEval test case used to provide the question, generated answer,
+# and retrieved context to the faithfulness evaluator.
 from deepeval.test_case import LLMTestCase
 
-from core.pipeline import RAGPipeline
-from eval.dataset_loader import load_negative_cases, load_positive_cases
-from eval.groq_deepeval_llm import GroqDeepEvalLLM
-from search.citation_enforcer import NO_CITATIONS_MESSAGE, UNSUPPORTED_ANSWER_MESSAGE
 
+# -----------------------------------------------------------------------------
+# PROJECT IMPORTS
+# -----------------------------------------------------------------------------
+
+# Main RAG pipeline responsible for:
+#   1. Ingesting documents
+#   2. Retrieving relevant chunks
+#   3. Generating the final answer
+from core.pipeline import RAGPipeline
+
+# Functions that load the predefined positive and negative evaluation
+# questions from the CSV files.
+from eval.dataset_loader import load_negative_cases, load_positive_cases
+
+# Adapter that allows DeepEval to use the application's Groq LLM
+# as the evaluation/judge model.
+from eval.groq_deepeval_llm import GroqDeepEvalLLM
+
+# Refusal messages generated by the citation enforcement layer.
+#
+# These messages are used to determine whether the system correctly
+# refused an out-of-document question.
+from search.citation_enforcer import (NO_CITATIONS_MESSAGE, UNSUPPORTED_ANSWER_MESSAGE,)
+
+
+# -----------------------------------------------------------------------------
+# LOGGER
+# -----------------------------------------------------------------------------
+
+# Creates a logger for this module.
+#
+# Logging is useful for seeing the progress and individual evaluation
+# results without relying only on print statements.
 logger = logging.getLogger(__name__)
 
-FAITHFULNESS_THRESHOLD = 0.8  # per-question minimum score to count as "passing"
-FAITHFULNESS_AVG_THRESHOLD = 0.85  # average across all positive cases
-REFUSAL_RATE_THRESHOLD = 0.8  # fraction of negative cases correctly refused
+
+# =============================================================================
+# EVALUATION THRESHOLDS
+# =============================================================================
+
+# Minimum faithfulness score required for an individual positive question
+# to be considered passing.
+#
+# Example:
+#   Score = 0.90 -> PASS
+#   Score = 0.75 -> FAIL
+FAITHFULNESS_THRESHOLD = 0.8
 
 
+# Minimum average faithfulness score required across ALL positive questions.
+#
+# This protects against a situation where most questions perform well
+# but the overall RAG quality has degraded.
+FAITHFULNESS_AVG_THRESHOLD = 0.85
+
+
+# Minimum percentage of negative questions that must be correctly refused.
+#
+# 0.8 means at least 80% of out-of-document questions must be refused
+# correctly.
+REFUSAL_RATE_THRESHOLD = 0.8
+
+
+# =============================================================================
+# RESULT DATA CLASSES
+# =============================================================================
+
+# Stores the result of one positive-question faithfulness evaluation.
+#
+# Each object contains:
+#   question -> The original evaluation question
+#   answer   -> Answer generated by the RAG pipeline
+#   score    -> DeepEval faithfulness score
+#   reason   -> Explanation provided by DeepEval
 @dataclass
 class FaithfulnessResult:
     question: str
@@ -54,6 +180,12 @@ class FaithfulnessResult:
     reason: str
 
 
+# Stores the result of one negative-question refusal evaluation.
+#
+# Each object contains:
+#   question           -> The out-of-document question
+#   answer             -> Response produced by the RAG pipeline
+#   correctly_refused  -> True if the system returned an expected refusal
 @dataclass
 class RefusalResult:
     question: str
@@ -61,87 +193,510 @@ class RefusalResult:
     correctly_refused: bool
 
 
-def _evaluate_positive_cases(pipeline: RAGPipeline, judge: GroqDeepEvalLLM) -> List[FaithfulnessResult]:
-    metric = FaithfulnessMetric(threshold=FAITHFULNESS_THRESHOLD, model=judge, async_mode=False)
+# =============================================================================
+# POSITIVE CASE EVALUATION
+# =============================================================================
+
+def _evaluate_positive_cases(pipeline: RAGPipeline,judge: GroqDeepEvalLLM) -> List[FaithfulnessResult]:
+    """
+    Evaluate positive RAG questions for answer faithfulness.
+
+    FUNCTION:
+    ---------
+    Runs every positive test question through the real RAG pipeline and
+    evaluates whether the generated answer is supported by the retrieved
+    document chunks.
+
+    PROCESS:
+    --------
+    1. Create the DeepEval FaithfulnessMetric.
+    2. Load positive test cases from the CSV file.
+    3. Send each question through the RAG pipeline.
+    4. Collect the generated answer and retrieved citations/chunks.
+    5. Build a DeepEval LLMTestCase.
+    6. Pass the test case to DeepEval.
+    7. Store the score and explanation.
+    8. Return results for all questions.
+
+    IMPORTANT:
+    ----------
+    This evaluates the COMPLETE RAG flow rather than testing the retrieval
+    component in isolation.
+    """
+
+    # Create the DeepEval faithfulness metric.
+    #
+    # threshold:
+    #   Minimum score expected for an individual test case.
+    #
+    # model:
+    #   LLM used by DeepEval as the evaluation/judge model.
+    #
+    # async_mode=False:
+    #   Evaluations are executed synchronously.
+    metric = FaithfulnessMetric(
+        threshold=FAITHFULNESS_THRESHOLD,
+        model=judge,
+        async_mode=False,
+    )
+
+    # List used to store the result of every positive test case.
     results = []
 
+    # Load the curated positive questions from the evaluation dataset.
     for case in load_positive_cases():
+
+        # Run the question through the actual production RAG pipeline.
+        #
+        # The pipeline returns:
+        #   answer    -> Generated response
+        #   citations -> Retrieved document chunks supporting the answer
         answer, citations = pipeline.generate_answer(case.question)
+
+        # Build the DeepEval test case.
+        #
+        # input:
+        #   Original user question.
+        #
+        # actual_output:
+        #   Answer generated by the RAG pipeline.
+        #
+        # retrieval_context:
+        #   Text retrieved from the vector search system.
+        #
+        # DeepEval uses these values to determine whether the generated
+        # answer is supported by the retrieved context.
         test_case = LLMTestCase(
             input=case.question,
             actual_output=answer,
             retrieval_context=[c.snippet for c in citations],
         )
+
+        # Run the faithfulness evaluation.
+        #
+        # DeepEval calculates:
+        #   metric.score
+        #
+        # and provides:
+        #   metric.reason
+        #
+        # explaining why the answer received that score.
         metric.measure(test_case)
+
+        # Store the evaluation result in our own application-level
+        # result object.
         results.append(
             FaithfulnessResult(
-                question=case.question, answer=answer, score=metric.score, reason=metric.reason
+                question=case.question,
+                answer=answer,
+                score=metric.score,
+                reason=metric.reason,
             )
         )
-        logger.info("Faithfulness %.2f for: %r", metric.score, case.question)
 
+        # Write the individual score to the log.
+        logger.info(
+            "Faithfulness %.2f for: %r",
+            metric.score,
+            case.question,
+        )
+
+    # Return the results for all positive questions.
     return results
 
+
+# =============================================================================
+# NEGATIVE CASE EVALUATION
+# =============================================================================
 
 def _evaluate_negative_cases(pipeline: RAGPipeline) -> List[RefusalResult]:
-    refusal_messages = (NO_CITATIONS_MESSAGE, UNSUPPORTED_ANSWER_MESSAGE)
+    """
+    Evaluate whether the RAG pipeline correctly refuses
+    out-of-document questions.
+
+    FUNCTION:
+    ---------
+    Runs questions that are NOT covered by the policy documents through
+    the RAG pipeline and checks whether the system correctly refuses to
+    answer.
+
+    PURPOSE:
+    --------
+    Prevent hallucination.
+
+    A good RAG system should not answer questions using information that
+    does not exist in the approved document collection.
+    """
+
+    # Define the only responses that are considered valid refusals.
+    #
+    # These messages are produced by citation_enforcer.py when the system
+    # cannot provide a properly supported answer.
+    refusal_messages = (NO_CITATIONS_MESSAGE,UNSUPPORTED_ANSWER_MESSAGE,)
+
+    # Store results for every negative test case.
     results = []
 
+    # Load questions that are intentionally outside the document scope.
     for case in load_negative_cases():
+
+        # Run the out-of-document question through the real RAG pipeline.
+        #
+        # We do not need citations here because the objective is to verify
+        # whether the system refused instead of generating an answer.
         answer, _ = pipeline.generate_answer(case.question)
+
+        # Check whether the generated response exactly matches one of the
+        # approved refusal messages.
+        #
+        # True  -> Correctly refused
+        # False -> System answered the question and may have hallucinated
         correctly_refused = answer in refusal_messages
+
+        # Store the result.
         results.append(
-            RefusalResult(question=case.question, answer=answer, correctly_refused=correctly_refused)
-        )
-        logger.info(
-            "Refusal %s for: %r", "OK" if correctly_refused else "MISSED", case.question
+            RefusalResult(
+                question=case.question,
+                answer=answer,
+                correctly_refused=correctly_refused,
+            )
         )
 
+        # Log whether the refusal behaviour was correct.
+        logger.info(
+            "Refusal %s for: %r",
+            "OK" if correctly_refused else "MISSED",
+            case.question,
+        )
+
+    # Return results for all negative questions.
     return results
 
 
+# =============================================================================
+# MAIN EVALUATION
+# =============================================================================
+
 def run_evaluation() -> bool:
-    """Runs the full evaluation, prints a report, and returns whether it passed."""
+    """
+    Run the complete offline RAG evaluation.
+
+    RETURNS:
+    --------
+    True:
+        All configured quality thresholds passed.
+
+    False:
+        One or more quality thresholds failed.
+
+    HIGH-LEVEL FLOW:
+    ----------------
+    1. Create the RAG pipeline.
+    2. Ingest the policy documents.
+    3. Create the DeepEval judge model.
+    4. Evaluate positive questions for faithfulness.
+    5. Calculate average faithfulness.
+    6. Identify individual faithfulness failures.
+    7. Evaluate negative questions for refusal correctness.
+    8. Calculate refusal rate.
+    9. Identify missed refusals.
+    10. Print evaluation report.
+    11. Determine PASS/FAIL.
+    12. Return the result to the caller.
+    """
+
+    # -------------------------------------------------------------------------
+    # STEP 1: CREATE THE RAG PIPELINE
+    # -------------------------------------------------------------------------
+
+    # Create the complete RAG pipeline.
+    #
+    # This ensures that evaluation uses the same retrieval and generation
+    # components as the actual application.
     pipeline = RAGPipeline()
+
+
+    # -------------------------------------------------------------------------
+    # STEP 2: INGEST POLICY DOCUMENTS
+    # -------------------------------------------------------------------------
+
+    # Display progress information to the user.
     print("Ingesting policy documents...")
+
+    # Run document ingestion.
+    #
+    # This typically includes operations such as:
+    #   Document loading
+    #   Text extraction
+    #   Chunking
+    #   Embedding generation
+    #   Vector-store indexing
+    #
+    # The exact implementation is handled by RAGPipeline.
     for status in pipeline.ingest_documents():
+
+        # Display each ingestion status message.
         print(f"  {status}")
 
+
+    # -------------------------------------------------------------------------
+    # STEP 3: CREATE DEEPEVAL JUDGE
+    # -------------------------------------------------------------------------
+
+    # Create the LLM adapter used by DeepEval.
+    #
+    # The application's existing pipeline LLM is passed into the adapter
+    # so DeepEval can use it as the evaluation/judge model.
     judge = GroqDeepEvalLLM(pipeline.llm)
 
+
+    # -------------------------------------------------------------------------
+    # STEP 4: EVALUATE POSITIVE QUESTIONS
+    # -------------------------------------------------------------------------
+
     print("\nEvaluating faithfulness on positive cases...")
-    faithfulness_results = _evaluate_positive_cases(pipeline, judge)
-    avg_faithfulness = sum(r.score for r in faithfulness_results) / len(faithfulness_results)
-    failing = [r for r in faithfulness_results if r.score < FAITHFULNESS_THRESHOLD]
+
+    # Run all positive questions through the RAG pipeline and DeepEval.
+    faithfulness_results = _evaluate_positive_cases(pipeline, judge,)
+
+
+    # -------------------------------------------------------------------------
+    # STEP 5: CALCULATE AVERAGE FAITHFULNESS
+    # -------------------------------------------------------------------------
+
+    # Calculate the average faithfulness score across all positive cases.
+    #
+    # Example:
+    #   Scores = 0.90, 0.85, 0.95
+    #
+    #   Average = (0.90 + 0.85 + 0.95) / 3
+    avg_faithfulness = (sum(r.score for r in faithfulness_results) / len(faithfulness_results))
+
+
+    # -------------------------------------------------------------------------
+    # STEP 6: FIND INDIVIDUAL FAITHFULNESS FAILURES
+    # -------------------------------------------------------------------------
+
+    # Identify positive questions whose individual faithfulness score
+    # is below the configured minimum threshold.
+    failing = [
+        r
+        for r in faithfulness_results
+        if r.score < FAITHFULNESS_THRESHOLD
+    ]
+
+
+    # -------------------------------------------------------------------------
+    # STEP 7: EVALUATE NEGATIVE QUESTIONS
+    # -------------------------------------------------------------------------
 
     print("\nEvaluating refusal correctness on negative cases...")
+
+    # Run all out-of-document questions through the RAG pipeline.
     refusal_results = _evaluate_negative_cases(pipeline)
-    refusal_rate = sum(r.correctly_refused for r in refusal_results) / len(refusal_results)
-    missed_refusals = [r for r in refusal_results if not r.correctly_refused]
 
-    print("\n" + "=" * 70)
-    print("FAITHFULNESS REPORT")
-    print("=" * 70)
-    print(f"Average faithfulness: {avg_faithfulness:.2f} (threshold: {FAITHFULNESS_AVG_THRESHOLD})")
-    print(f"Cases below per-question threshold ({FAITHFULNESS_THRESHOLD}): {len(failing)}/{len(faithfulness_results)}")
-    for r in failing:
-        print(f"  - {r.score:.2f}: {r.question!r}")
-        print(f"      reason: {r.reason}")
 
-    print(f"\nRefusal rate: {refusal_rate:.2f} (threshold: {REFUSAL_RATE_THRESHOLD})")
-    print(f"Missed refusals: {len(missed_refusals)}/{len(refusal_results)}")
-    for r in missed_refusals:
-        print(f"  - {r.question!r}")
-        print(f"      answered instead of refusing: {r.answer[:100]!r}")
+    # -------------------------------------------------------------------------
+    # STEP 8: CALCULATE REFUSAL RATE
+    # -------------------------------------------------------------------------
 
-    passed = (
-        avg_faithfulness >= FAITHFULNESS_AVG_THRESHOLD and refusal_rate >= REFUSAL_RATE_THRESHOLD
+    # Calculate the percentage of negative questions that were correctly
+    # refused.
+    #
+    # In Python:
+    #   True  behaves as 1
+    #   False behaves as 0
+    #
+    # Therefore:
+    #
+    #   sum(True, False, True) = 2
+    #
+    # and:
+    #
+    #   2 / 3 = 0.67
+    refusal_rate = (
+        sum(r.correctly_refused for r in refusal_results)
+        / len(refusal_results)
     )
-    print(f"\nRESULT: {'PASS' if passed else 'FAIL'}")
+
+
+    # -------------------------------------------------------------------------
+    # STEP 9: FIND MISSED REFUSALS
+    # -------------------------------------------------------------------------
+
+    # Identify negative questions where the system failed to refuse.
+    #
+    # These are potentially dangerous because the RAG system may have
+    # generated unsupported or hallucinated information.
+    missed_refusals = [
+        r
+        for r in refusal_results
+        if not r.correctly_refused
+    ]
+
+
+    # =============================================================================
+    # EVALUATION REPORT
+    # =============================================================================
+
+    # Print a visual separator.
+    print("\n" + "=" * 70)
+
+    # Print report title.
+    print("FAITHFULNESS REPORT")
+
+    # Print another separator.
+    print("=" * 70)
+
+
+    # -------------------------------------------------------------------------
+    # FAITHFULNESS SUMMARY
+    # -------------------------------------------------------------------------
+
+    # Display the average faithfulness score and required threshold.
+    print(
+        f"Average faithfulness: "
+        f"{avg_faithfulness:.2f} "
+        f"(threshold: {FAITHFULNESS_AVG_THRESHOLD})"
+    )
+
+
+    # Display how many individual positive cases failed
+    # the per-question threshold.
+    print(
+        f"Cases below per-question threshold "
+        f"({FAITHFULNESS_THRESHOLD}): "
+        f"{len(failing)}/{len(faithfulness_results)}"
+    )
+
+
+    # -------------------------------------------------------------------------
+    # DISPLAY INDIVIDUAL FAITHFULNESS FAILURES
+    # -------------------------------------------------------------------------
+
+    for r in failing:
+
+        # Display the score and question.
+        print(
+            f"  - {r.score:.2f}: {r.question!r}"
+        )
+
+        # Display DeepEval's explanation for the low score.
+        print(
+            f"      reason: {r.reason}"
+        )
+
+
+    # -------------------------------------------------------------------------
+    # REFUSAL SUMMARY
+    # -------------------------------------------------------------------------
+
+    # Display the overall refusal rate and required threshold.
+    print(
+        f"\nRefusal rate: "
+        f"{refusal_rate:.2f} "
+        f"(threshold: {REFUSAL_RATE_THRESHOLD})"
+    )
+
+
+    # Display the number of negative questions that were not correctly
+    # refused.
+    print(
+        f"Missed refusals: "
+        f"{len(missed_refusals)}/{len(refusal_results)}"
+    )
+
+
+    # -------------------------------------------------------------------------
+    # DISPLAY MISSED REFUSALS
+    # -------------------------------------------------------------------------
+
+    for r in missed_refusals:
+
+        # Display the question that should have been refused.
+        print(
+            f"  - {r.question!r}"
+        )
+
+        # Display the first 100 characters of the generated answer.
+        #
+        # Limiting the output prevents a potentially long hallucinated
+        # response from making the evaluation report unnecessarily large.
+        print(
+            f"      answered instead of refusing: "
+            f"{r.answer[:100]!r}"
+        )
+
+
+    # =============================================================================
+    # FINAL PASS / FAIL DECISION
+    # =============================================================================
+
+    # The complete evaluation passes ONLY when:
+    #
+    # 1. Average faithfulness meets the configured threshold
+    #
+    # AND
+    #
+    # 2. Refusal rate meets the configured threshold
+    #
+    # Both conditions must be true.
+    passed = (
+        avg_faithfulness >= FAITHFULNESS_AVG_THRESHOLD
+        and refusal_rate >= REFUSAL_RATE_THRESHOLD
+    )
+
+
+    # Display the final evaluation result.
+    print(
+        f"\nRESULT: {'PASS' if passed else 'FAIL'}"
+    )
+
+
+    # Return True or False to the caller.
     return passed
 
 
+# =============================================================================
+# SCRIPT ENTRY POINT
+# =============================================================================
+
+# This block executes only when this Python file is executed directly
+# or using:
+#
+#     python -m eval.evaluate_faithfulness
+#
+# It does NOT execute when the module is imported by another Python file.
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+    # Configure the logging system.
+    #
+    # level=INFO:
+    #   Shows informational evaluation messages.
+    #
+    # format:
+    #   Displays the log level followed by the message.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s: %(message)s",
+    )
+
+
+    # Run the complete evaluation.
     passed = run_evaluation()
+
+
+    # Return the appropriate operating-system exit code.
+    #
+    # 0 -> SUCCESS / PASS
+    # 1 -> FAILURE / FAIL
+    #
+    # This is particularly important for CI/CD.
+    #
+    # Example:
+    #
+    #   Evaluation PASS -> pipeline continues
+    #
+    #   Evaluation FAIL -> CI/CD build can fail
+    #
     sys.exit(0 if passed else 1)
