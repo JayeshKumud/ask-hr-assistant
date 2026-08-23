@@ -1,7 +1,6 @@
-| # | Question                                                                           | Expected RAG answer                                                                                                                                                                   |
-| - | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1 | What is NexaCore's employee dental insurance annual limit?                         | **The policy does not provide information about dental insurance annual limits.**                                                                                                     |
-| 2 | What is the company's policy for employee stock-option exercise after termination? | **The policy does not specify the stock-option exercise period after termination.** It only states that equity awards are governed by the applicable equity plan and grant documents. |
-| 3 | What is the maximum annual training budget per employee?                           | **The policy does not provide information about employee training budgets.**                                                                                                          |
-| 4 | Which hotel chain should employees use when travelling for business?               | **The policy does not specify an approved hotel chain or business-travel hotel policy.**                                                                                              |
-| 5 | What is NexaCore's laptop replacement policy?                                      | **The policy does not provide information about laptop replacement.**                                                                                                                 |
+id,question,expected_note
+1,What is NexaCore's employee dental insurance annual limit?,The policy does not provide information about dental insurance annual limits.
+2,What is the company's policy for employee stock-option exercise after termination?,The policy does not specify the stock-option exercise period after termination. It only states that equity awards are governed by the applicable equity plan and grant documents.
+3,What is the maximum annual training budget per employee?,The policy does not provide information about employee training budgets.
+4,Which hotel chain should employees use when travelling for business?,The policy does not specify an approved hotel chain or business-travel hotel policy.
+5,What is NexaCore's laptop replacement policy?,The policy does not provide information about laptop replacement.

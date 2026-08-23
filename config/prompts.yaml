@@ -1,0 +1,66 @@
+# Versioned prompt templates for the RAG pipeline.
+#
+# Prompts are effectively part of this system's behavior — a wording
+# change can shift what the LLM answers just as much as a code change
+# can. Keeping them here, separate from Python source, means:
+#   - a prompt change shows up as its own diff, not buried in code
+#   - each prompt has its own version number, independent of app version
+#   - prompt changes can be reviewed without touching src/
+#
+# Loaded by src/core/prompt_registry.py, consumed by src/search/prompts.py.
+# Bump a prompt's `version` whenever you change its `template`/`persona`
+# text — it's a manual convention, not enforced by code, but keep it
+# honest so version numbers stay meaningful.
+
+qa_prompt:
+  version: "1.0.0"
+  description: >
+    Persona line prepended to LangChain's built-in stuff_prompt.template
+    (that base template isn't ours to version — we only own this prefix).
+    Used by search/qa_chain.py's build_qa_chain() as the outer instruction
+    prompt sent to the LLM for the main answer.
+  persona: >-
+    You are a helpful assistant for NexaCore's employee leave and visa
+    policy. Answer only from the provided policy excerpts.
+
+example_prompt:
+  version: "1.0.0"
+  description: >
+    Formats a single retrieved chunk before it's inserted into the main
+    prompt's {summaries} slot. input_variables must match keys present on
+    every retrieved Document's metadata (see search/prompts.py's own
+    docstring for why).
+  template: "Content: {page_content}\nSource: {source}"
+  input_variables:
+    - page_content
+    - source
+
+verification_prompt:
+  version: "1.0.0"
+  description: >
+    Second-pass citation enforcement check (search/citation_enforcer.py):
+    given the retrieved excerpts and a generated answer, judges whether
+    every claim in the answer is actually supported by those excerpts.
+    Deliberately asks for a single leading keyword (SUPPORTED /
+    NOT_SUPPORTED) so the response parses reliably.
+  template: >-
+    You are checking whether an answer is fully supported by the given
+    policy excerpts. Do not use any outside knowledge.
+
+
+    Excerpts:
+
+    {context}
+
+
+    Answer to check:
+
+    {answer}
+
+
+    Does every factual claim in the answer appear in the excerpts above?
+    Respond with exactly one word on the first line — SUPPORTED or
+    NOT_SUPPORTED — then a one-sentence reason on the next line.
+  input_variables:
+    - context
+    - answer

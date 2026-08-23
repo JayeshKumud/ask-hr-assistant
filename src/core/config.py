@@ -61,7 +61,7 @@ class Settings:
     policies_dir: Path = PROJECT_ROOT / os.getenv("POLICIES_DIR", "resources/policies")
 
     # --- Retrieval / QA ---
-    top_k: int = int(os.getenv("TOP_K", "5"))
+    top_k: int = int(os.getenv("TOP_K", "3"))
     max_tokens_limit: int = int(os.getenv("MAX_TOKENS_LIMIT", "8000"))
 
     # --- Hybrid retrieval ---

@@ -1,5 +1,5 @@
 [project]
-name = "policy-iq"
+name = "rag-research-iq"
 version = "0.1.0"
 description = "RAG-based assistant for company leave and visa policy documents"
 requires-python = ">=3.11,<3.13"
@@ -14,6 +14,8 @@ dependencies = [
     "sentence-transformers",
     "pypdf",
     "rank_bm25",
+    "pyyaml",
+    "deepeval",
     "streamlit",
     "python-dotenv",
     "pydantic",

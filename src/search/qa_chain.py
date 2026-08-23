@@ -5,16 +5,10 @@ from langchain_classic.chains.qa_with_sources.loading import load_qa_with_source
 
 from core.config import settings
 from processing.vector_store import VectorStoreManager
+from search.citation_enforcer import enforce_citations
 from search.citations import Citation, extract_citations
-from search.hybrid_retriever import build_hybrid_retriever
 from search.prompts import PROMPT, EXAMPLE_PROMPT
-
-
-from core.config import settings
-from processing.vector_store import VectorStoreManager
-from search.citations import Citation, extract_citations
 from search.reranker import build_reranking_retriever
-from search.prompts import PROMPT, EXAMPLE_PROMPT
 
 
 def build_qa_chain(llm, vsm: VectorStoreManager) -> RetrievalQAWithSourcesChain:
@@ -41,16 +35,24 @@ def build_qa_chain(llm, vsm: VectorStoreManager) -> RetrievalQAWithSourcesChain:
         return_source_documents=True,
     )
 
-def generate_answer(chain: RetrievalQAWithSourcesChain, query: str) -> Tuple[str, List[Citation]]:
+def generate_answer(
+    chain: RetrievalQAWithSourcesChain, llm, query: str
+) -> Tuple[str, List[Citation]]:
     """
     Runs a query through the QA chain, returns (answer, list of Citations).
 
     Citations are built from result["source_documents"] — the chunks the
     retriever actually returned — rather than parsing the LLM's own
     "SOURCES:" text output, which only ever repeated the filename with no
-    page/location info and can't be trusted to be accurate (that's exactly
-    what Phase 5's citation enforcement will need to guard against).
+    page/location info and can't be trusted to be accurate.
+
+    Before returning, the answer passes through citation enforcement
+    (search/citation_enforcer.py): a second, focused LLM call checks
+    whether the answer's claims are actually backed by the retrieved
+    excerpts, and replaces it with an explicit refusal if not — rather
+    than returning a plausible-sounding but unsupported answer.
     """
     result = chain.invoke({"question": query}, return_only_outputs=True)
     citations = extract_citations(result["source_documents"])
-    return result["answer"], citations
+    answer, citations = enforce_citations(llm, query, result["answer"], citations)
+    return answer, citations
