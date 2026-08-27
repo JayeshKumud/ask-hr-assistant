@@ -1,11 +1,13 @@
-from typing import List, Tuple, Iterator, Optional
+from typing import List, Tuple, Iterator, Optional, Any, Sequence
 
-from langchain_groq import ChatGroq
+from langchain_core.messages import AIMessage
+from langchain_core.prompt_values import PromptValue
+from langchain_core.runnables import RunnableWithFallbacks
 
-from core.config import settings
-from processing.vector_store import VectorStoreManager
+from core.llm_wrappers import build_llm_with_fallback
 from ingestion.document_loader import load_documents
 from ingestion.text_splitter import split_documents
+from processing.vector_store import VectorStoreManager
 from search.citations import Citation
 from search.qa_chain import build_qa_chain, generate_answer as _generate_answer
 
@@ -23,27 +25,13 @@ class RAGPipeline:
         self._vsm = vector_store_manager or VectorStoreManager()
 
     @property
-    def llm(self) -> ChatGroq:
+    def llm(self) -> Any | RunnableWithFallbacks[PromptValue | str | Sequence[Any], AIMessage]:
         if self._llm is None:
-            self._llm = ChatGroq(
-                model=settings.llm_model,
-                temperature=settings.llm_temperature,
-                max_tokens=settings.llm_max_tokens,
-                # qwen3 models reason internally by default, and that
-                # reasoning consumes tokens from the SAME max_tokens
-                # budget as the final answer. reasoning_format="hidden"
-                # (an earlier attempt) only hides the reasoning text from
-                # the output — it doesn't stop the model from spending
-                # tokens on it, which is what caused empty answers when
-                # max_tokens was too small. reasoning_effort="none" fixes
-                # this at the root: it disables internal reasoning
-                # entirely, so the full token budget goes to the actual
-                # answer. Appropriate here since this is a narrow
-                # retrieval-grounded QA task, not a multistep reasoning
-                # problem — the retrieved chunks are already doing the
-                # "thinking".
-                reasoning_effort="none",
-            )
+            # build_llm_with_fallback() chains Groq/Qwen (primary) ->
+            # HuggingFace Gemma -> HuggingFace Mistral, per
+            # core/config.py's three model configs. See
+            # core/llm_wrappers.py for the fallback + logging design.
+            self._llm = build_llm_with_fallback()
         return self._llm
 
     def ingest_documents(self) -> Iterator[str]:
@@ -76,10 +64,11 @@ class RAGPipeline:
 
 if __name__ == "__main__":
     # Manual smoke test: ingests the real policy documents, asks one
-    # question, prints the answer + citations. Needs GROQ_API_KEY set in
-    # .env. Run with: python -m core.pipeline (from src/, with the venv
-    # active) — confirms ingestion + retrieval + generation + citations
-    # all work together before you commit.
+    # question, prints the answer + citations. Needs GROQ_API_KEY (and
+    # whichever HuggingFace/featherless-ai key the fallback models need)
+    # set in .env. Run with: python -m core.pipeline (from src/, with the
+    # venv active) — confirms ingestion + retrieval + generation +
+    # citations + fallback wiring all work together before you commit.
     pipeline = RAGPipeline()
 
     for status in pipeline.ingest_documents():

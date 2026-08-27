@@ -52,7 +52,7 @@ class VectorStoreManager:
         self._store: Optional[Chroma] = None
 
     @property
-    def store(self) -> Chroma:
+    def store(self) -> Chroma | None:
         """
         Return the Chroma vector store, creating it if necessary.
 

@@ -12,7 +12,7 @@ list is the single source of truth for versions.
 ## 2. Create the virtual environment
 
 ```powershell
-python -m venv .venv
+python -3.12 -m venv .venv
 .venv\Scripts\activate
 ```
 
@@ -134,7 +134,7 @@ regardless of cwd.
 
 **`groq.NotFoundError: model ... does not exist`**
 Groq periodically deprecates models. Check `src/core/config.py`'s
-`llm_model` default (or your `.env`'s `LLM_MODEL`) against Groq's
+`llm_groq_qwen_model` default (or your `.env`'s `LLM_MODEL`) against Groq's
 [current model list](https://console.groq.com/docs/models).
 
 **Answer comes back empty, but citations are populated**

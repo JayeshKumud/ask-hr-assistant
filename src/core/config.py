@@ -3,41 +3,33 @@ from pathlib import Path
 from dataclasses import dataclass
 from dotenv import load_dotenv
 
+from core.logging import configure_logging
+
+configure_logging(enabled=False)
 load_dotenv()
 
 # Anchor all default relative paths to the project root, not the
 # process's current working directory. cwd varies depending on how the
 # script is launched — `python -m core.pipeline` from the project root
-# sets cwd there, but running a file directly (e.g. PyCharm's default
-# "Run" button behavior, or double-clicking a script) often sets cwd to
-# the FILE'S OWN folder instead. A relative path like "resources/policies"
-# silently resolves to a different (often nonexistent) location depending
-# on which one launched the process. __file__ always points at this
-# file's real location on disk regardless of cwd, so walking up from it
-# gives a stable anchor no launcher can break.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 @dataclass(frozen=True)
 class Settings:
     # --- Embeddings ---
-    embedding_model: str = os.getenv(
-        "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
-    )
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    embedding_model: str = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
     # --- LLM ---
-    llm_model: str = os.getenv("LLM_MODEL", "qwen/qwen3.6-27b")
+    llm_groq_qwen_model: str = os.getenv("LLM_MODEL", "NON_EXISTING_qwen/qwen3.6-27b")
+    llm_groq_provider: str = os.getenv("LLM_GROQ_PROVIDER", "groq")
+
+    llm_huggingface_google_model: str = os.getenv("LLM_HUGGINGFACE_GOOGLE_MODEL", "google/gemma-2-2b-it:featherless-ai")
+    llm_huggingface_google_provider: str = os.getenv("LLM_HUGGINGFACE_GOOGLE_PROVIDER", "huggingface")
+    llm_huggingface_mistral_model: str = os.getenv("LLM_HUGGINGFACE_MISTRAL_MODEL", "mistralai/Mistral-7B-Instruct-v0.2:featherless-ai")
+    llm_huggingface_mistral_provider: str = os.getenv("LLM_HUGGINGFACE_MISTRAL_PROVIDER", "huggingface")
+
     llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.5"))
-    # This is the OUTPUT generation budget — how many tokens the model may
-    # produce in total (reasoning + final answer combined), NOT the input
-    # context size. The old default of 500 was too small: qwen3.6-27b
-    # reasons internally before answering, and that reasoning consumes
-    # tokens from this same budget even when reasoning_format="hidden"
-    # (hidden only hides reasoning from the output text — it doesn't make
-    # reasoning free). At 500, the model could run out of budget mid-
-    # thought and never reach "FINAL ANSWER: ...", producing an empty
-    # answer while citations still populated fine (those come from the
-    # retriever, independent of what the LLM actually generated).
     llm_max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "1500"))
 
     # --- Chunking ---
@@ -50,9 +42,7 @@ class Settings:
     # is set to an absolute path via env var instead, pathlib's `/`
     # operator discards PROJECT_ROOT automatically and uses the absolute
     # path as-is — no special-casing needed for that case.
-    vector_store_dir: Path = PROJECT_ROOT / os.getenv(
-        "VECTOR_STORE_DIR", "resources/vectorstore"
-    )
+    vector_store_dir: Path = PROJECT_ROOT / os.getenv("VECTOR_STORE_DIR", "resources/vectorstore")
     collection_name: str = os.getenv("COLLECTION_NAME", "company_policies")
 
     # --- Ingestion ---
@@ -78,9 +68,7 @@ class Settings:
     vector_weight: float = float(os.getenv("VECTOR_WEIGHT", "0.5"))
 
     # --- Re-ranking ---
-    reranker_model: str = os.getenv(
-        "RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    )
+    reranker_model: str = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
     # How many candidates hybrid retrieval fetches BEFORE the cross-encoder
     # re-ranks and narrows them down to top_k for the final prompt. This
     # must be wider than top_k, or there's nothing for the re-ranker to

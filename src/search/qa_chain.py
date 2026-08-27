@@ -35,9 +35,7 @@ def build_qa_chain(llm, vsm: VectorStoreManager) -> RetrievalQAWithSourcesChain:
         return_source_documents=True,
     )
 
-def generate_answer(
-    chain: RetrievalQAWithSourcesChain, llm, query: str
-) -> Tuple[str, List[Citation]]:
+def generate_answer(chain: RetrievalQAWithSourcesChain, llm, query: str) -> Tuple[str, List[Citation]]:
     """
     Runs a query through the QA chain, returns (answer, list of Citations).
 
