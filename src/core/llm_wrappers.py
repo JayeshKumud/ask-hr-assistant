@@ -70,9 +70,7 @@ class AccurateChatLiteLLM(ChatLiteLLM):
     def get_num_tokens(self, text: str) -> int:
         return token_counter(model=self.model, text=text)
 
-    def get_num_tokens_from_messages(
-        self, messages: List[BaseMessage], tools: Optional[Sequence[Any]] = None
-    ) -> int:
+    def get_num_tokens_from_messages(self, messages: List[BaseMessage], tools: Optional[Sequence[Any]] = None) -> int:
         litellm_messages = [
             {
                 "role": _MESSAGE_TYPE_TO_ROLE.get(m.type, m.type),

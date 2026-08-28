@@ -33,7 +33,7 @@ narrowly scoped to its own concern.
 |              |   |                  |   |   enforcement       |
 +--------------+   +------------------+   +---------------------+
                          ^                        ^
-                         | constants               | versioned
+                         | constants              | versioned
                 +--------+---------+       +--------+--------+
                 |  core/config.py  |       | config/prompts  |
                 | (env-driven,     |       | .yaml           |

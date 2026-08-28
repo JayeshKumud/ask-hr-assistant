@@ -27,18 +27,20 @@ _NOISY_LOGGERS = [
 ]
 
 
-def configure_logging(enabled: bool = True, level: int = logging.DEBUG) -> None:
-    """Configure root and third-party logger verbosity, plus raw HTTP debug output."""
+def configure_logging(enabled: bool = True, level: int = logging.DEBUG, http_debug: bool = False) -> None:
+
     if not enabled:
+        http_client.HTTPConnection.debuglevel = 0
         return
 
     logging.basicConfig(
         level=level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         stream=sys.stdout,
+        force=True,
     )
 
-    for noisy_logger in _NOISY_LOGGERS:
-        logging.getLogger(noisy_logger).setLevel(level)
+    for logger_name in _NOISY_LOGGERS:
+        logging.getLogger(logger_name).setLevel(level)
 
-    http_client.HTTPConnection.debuglevel = 1
+    http_client.HTTPConnection.debuglevel = 1 if http_debug else 0

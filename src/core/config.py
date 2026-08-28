@@ -3,7 +3,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from dotenv import load_dotenv
 
-from core.logging import configure_logging
+from core.configure_logging import configure_logging
 
 configure_logging(enabled=False)
 load_dotenv()
@@ -12,18 +12,19 @@ load_dotenv()
 # process's current working directory. cwd varies depending on how the
 # script is launched — `python -m core.pipeline` from the project root
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+# os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 @dataclass(frozen=True)
 class Settings:
     # --- Embeddings ---
-    os.environ["HF_HUB_OFFLINE"] = "1"
+    # os.environ["HF_HUB_OFFLINE"] = "1"
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
-    # --- LLM ---
-    llm_groq_qwen_model: str = os.getenv("LLM_MODEL", "NON_EXISTING_qwen/qwen3.6-27b")
+    # --- groq LLM ---
+    llm_groq_qwen_model: str = os.getenv("LLM_MODEL", "qwen/qwen3.6-27b")
     llm_groq_provider: str = os.getenv("LLM_GROQ_PROVIDER", "groq")
 
+    # --- huggingface LLM ---
     llm_huggingface_google_model: str = os.getenv("LLM_HUGGINGFACE_GOOGLE_MODEL", "google/gemma-2-2b-it:featherless-ai")
     llm_huggingface_google_provider: str = os.getenv("LLM_HUGGINGFACE_GOOGLE_PROVIDER", "huggingface")
     llm_huggingface_mistral_model: str = os.getenv("LLM_HUGGINGFACE_MISTRAL_MODEL", "mistralai/Mistral-7B-Instruct-v0.2:featherless-ai")

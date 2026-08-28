@@ -59,6 +59,7 @@ class RAGPipeline:
             raise RuntimeError("Vector database is not initialized")
 
         chain = build_qa_chain(self.llm, self._vsm)
+
         return _generate_answer(chain, self.llm, query)
 
 

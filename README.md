@@ -40,7 +40,7 @@ domain and ingestion source were replaced.
 See **[SETUP.md](SETUP.md)** for full instructions. Short version:
 
 ```bash
-python -m venv .venv
+py -3.12 -m venv .venv
 .venv\Scripts\activate        # Windows
 # source .venv/bin/activate   # macOS/Linux
 
