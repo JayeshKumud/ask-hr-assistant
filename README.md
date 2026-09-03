@@ -40,14 +40,8 @@ domain and ingestion source were replaced.
 See **[SETUP.md](SETUP.md)** for full instructions. Short version:
 
 ```bash
-py -3.12 -m venv .venv
-.venv\Scripts\activate        # Windows
-# source .venv/bin/activate   # macOS/Linux
-
-pip install -e .
-copy .env.example .env        # then add your GROQ_API_KEY
-
-streamlit run src/gui/main.py
+uv sync
+uv run streamlit run src/gui/main.py
 ```
 
 In the app: click **Index Policy Documents** in the sidebar first, then

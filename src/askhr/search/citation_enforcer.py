@@ -19,8 +19,8 @@ this module is what runs on every single real query).
 import logging
 from typing import List, Tuple
 
-from search.citations import Citation
-from search.prompts import VERIFICATION_PROMPT
+from askhr.search.citations import Citation
+from askhr.search.prompts import VERIFICATION_PROMPT
 
 logger = logging.getLogger(__name__)
 

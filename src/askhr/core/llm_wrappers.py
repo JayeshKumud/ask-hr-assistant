@@ -47,7 +47,7 @@ from langchain_core.runnables import RunnableWithFallbacks
 from langchain_litellm import ChatLiteLLM
 from litellm import token_counter
 
-from core.config import settings
+from askhr.core.config import settings
 
 os.environ['LITELLM_LOG'] = 'DEBUG'
 logger = logging.getLogger(__name__)

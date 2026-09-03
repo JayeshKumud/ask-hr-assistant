@@ -17,7 +17,7 @@ from typing import Any, Dict
 
 import yaml
 
-from core.config import PROJECT_ROOT
+from askhr.core.config import PROJECT_ROOT
 
 PROMPTS_FILE = PROJECT_ROOT / "config" / "prompts.yaml"
 

@@ -25,8 +25,8 @@ retriever's configured weight and how high it ranked.
 from langchain_classic.retrievers import EnsembleRetriever
 from langchain_community.retrievers import BM25Retriever
 
-from core.config import settings
-from processing.vector_store import VectorStoreManager
+from askhr.core.config import settings
+from askhr.processing.vector_store import VectorStoreManager
 
 
 from typing import Optional
@@ -34,8 +34,8 @@ from typing import Optional
 from langchain_classic.retrievers import EnsembleRetriever
 from langchain_community.retrievers import BM25Retriever
 
-from core.config import settings
-from processing.vector_store import VectorStoreManager
+from askhr.core.config import settings
+from askhr.processing.vector_store import VectorStoreManager
 
 
 def build_hybrid_retriever(vsm: VectorStoreManager, k: Optional[int] = None) -> EnsembleRetriever:

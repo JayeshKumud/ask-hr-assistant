@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
-from core.config import PROJECT_ROOT
+from askhr.core.config import PROJECT_ROOT
 
 SAMPLE_QUESTIONS_DIR = PROJECT_ROOT / "resources" / "sample_questions"
 POSITIVE_CSV = SAMPLE_QUESTIONS_DIR / "positive_rag_questions.csv"

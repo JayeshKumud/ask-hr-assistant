@@ -3,12 +3,12 @@ from typing import Tuple, List
 from langchain_classic.chains import RetrievalQAWithSourcesChain
 from langchain_classic.chains.qa_with_sources.loading import load_qa_with_sources_chain
 
-from core.config import settings
-from processing.vector_store import VectorStoreManager
-from search.citation_enforcer import enforce_citations
-from search.citations import Citation, extract_citations
-from search.prompts import PROMPT, EXAMPLE_PROMPT
-from search.reranker import build_reranking_retriever
+from askhr.core.config import settings
+from askhr.processing.vector_store import VectorStoreManager
+from askhr.search.citation_enforcer import enforce_citations
+from askhr.search.citations import Citation, extract_citations
+from askhr.search.prompts import PROMPT, EXAMPLE_PROMPT
+from askhr.search.reranker import build_reranking_retriever
 
 
 def build_qa_chain(llm, vsm: VectorStoreManager) -> RetrievalQAWithSourcesChain:

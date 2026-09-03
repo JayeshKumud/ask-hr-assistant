@@ -3,7 +3,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from dotenv import load_dotenv
 
-from core.configure_logging import configure_logging
+from askhr.core.configure_logging import configure_logging
 
 configure_logging(enabled=False)
 load_dotenv()
@@ -11,13 +11,11 @@ load_dotenv()
 # Anchor all default relative paths to the project root, not the
 # process's current working directory. cwd varies depending on how the
 # script is launched — `python -m core.pipeline` from the project root
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-# os.environ["TOKENIZERS_PARALLELISM"] = "false"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 @dataclass(frozen=True)
 class Settings:
     # --- Embeddings ---
-    # os.environ["HF_HUB_OFFLINE"] = "1"
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
     # --- groq LLM ---

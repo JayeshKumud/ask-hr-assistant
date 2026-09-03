@@ -29,9 +29,9 @@ from langchain_classic.retrievers import ContextualCompressionRetriever
 from langchain_classic.retrievers.document_compressors import CrossEncoderReranker
 from langchain_community.cross_encoders import HuggingFaceCrossEncoder
 
-from core.config import settings
-from processing.vector_store import VectorStoreManager
-from search.hybrid_retriever import build_hybrid_retriever
+from askhr.core.config import settings
+from askhr.processing.vector_store import VectorStoreManager
+from askhr.search.hybrid_retriever import build_hybrid_retriever
 
 
 def build_reranking_retriever(vsm: VectorStoreManager) -> ContextualCompressionRetriever:

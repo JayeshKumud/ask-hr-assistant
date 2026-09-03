@@ -10,8 +10,8 @@ from typing import Iterable, Optional, Any
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
-from core.config import settings
-from processing.embeddings import build_embedding_function
+from askhr.core.config import settings
+from askhr.processing.embeddings import build_embedding_function
 
 
 class VectorStoreManager:

@@ -36,7 +36,7 @@ Three templates are built here, all consumed elsewhere in search/:
 from langchain_classic.prompts import PromptTemplate
 from langchain_classic.chains.qa_with_sources.stuff_prompt import template
 
-from core.prompt_registry import get_prompt
+from askhr.core.prompt_registry import get_prompt
 
 _qa_config = get_prompt("qa_prompt")
 updated_template = _qa_config["persona"] + template

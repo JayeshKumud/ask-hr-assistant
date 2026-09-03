@@ -24,7 +24,7 @@ from typing import List
 from langchain_community.document_loaders import DirectoryLoader, PyPDFLoader
 from langchain_core.documents import Document
 
-from core.config import settings
+from askhr.core.config import settings
 
 logger = logging.getLogger(__name__)
 

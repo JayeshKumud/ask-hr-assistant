@@ -9,19 +9,11 @@ This project uses a plain `venv` + `pyproject.toml` — no conda, no
 `requirements.txt`/`environment.yaml`. `pyproject.toml`'s `dependencies`
 list is the single source of truth for versions.
 
-## 2. Create the virtual environment
+## 2. Create the virtual environment & install
 
 ```powershell
-python -3.12 -m venv .venv
-.venv\Scripts\activate
-```
-
-(macOS/Linux: `source .venv/bin/activate`)
-
-## 3. Install the project
-
-```powershell
-pip install -e .
+uv sync
+uv run streamlit run src/gui/main.py
 ```
 
 Installs the project itself in editable mode plus every dependency in
@@ -31,9 +23,7 @@ top-level packages regardless of which directory you run a script from
 (`pyproject.toml` uses `where = ["src"]`, so those live at the top level,
 not under a `src.` prefix).
 
-If you change a dependency later, re-run `pip install -e .` to pick it up.
-
-## 4. Configure environment variables
+## 3. Configure environment variables
 
 ```powershell
 copy .env.example .env
@@ -50,13 +40,13 @@ re-ranker model, token limits — see `src/core/config.py` for the full
 list) has a sensible default; only override what you actually need to
 change.
 
-## 5. Add your policy documents
+## 4. Add your policy documents
 
 Drop PDF files into `resources/policies/`. Only `.pdf` is currently
 supported (see `ARCHITECTURE.md` for why HTML support was dropped).
 Filenames don't matter — every PDF in that folder gets ingested.
 
-## 6. Run it
+## 5. Run it
 
 ```powershell
 streamlit run src/gui/main.py

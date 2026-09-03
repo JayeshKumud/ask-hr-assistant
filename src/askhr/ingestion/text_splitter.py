@@ -3,7 +3,7 @@ from typing import Dict, List, Tuple
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 
-from core.config import settings
+from askhr.core.config import settings
 
 
 def split_documents(docs: List[Document]) -> List[Document]:
@@ -60,7 +60,7 @@ if __name__ == "__main__":
     # actually increments correctly within each page rather than just
     # being 0 everywhere (an easy off-by-reference bug with a shared
     # counter dict).
-    from ingestion.document_loader import load_documents
+    from askhr.ingestion.document_loader import load_documents
 
     pages = load_documents()
     found_chunks = split_documents(pages)

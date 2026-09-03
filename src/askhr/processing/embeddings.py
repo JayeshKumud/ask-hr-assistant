@@ -6,7 +6,7 @@
 
 from langchain_huggingface import HuggingFaceEmbeddings
 
-from core.config import settings
+from askhr.core.config import settings
 
 
 def build_embedding_function() -> HuggingFaceEmbeddings:

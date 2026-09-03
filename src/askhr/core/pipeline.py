@@ -4,12 +4,12 @@ from langchain_core.messages import AIMessage
 from langchain_core.prompt_values import PromptValue
 from langchain_core.runnables import RunnableWithFallbacks
 
-from core.llm_wrappers import build_llm_with_fallback
-from ingestion.document_loader import load_documents
-from ingestion.text_splitter import split_documents
-from processing.vector_store import VectorStoreManager
-from search.citations import Citation
-from search.qa_chain import build_qa_chain, generate_answer as _generate_answer
+from askhr.core.llm_wrappers import build_llm_with_fallback
+from askhr.ingestion.document_loader import load_documents
+from askhr.ingestion.text_splitter import split_documents
+from askhr.processing.vector_store import VectorStoreManager
+from askhr.search.citations import Citation
+from askhr.search.qa_chain import build_qa_chain, generate_answer as _generate_answer
 
 
 class RAGPipeline:
