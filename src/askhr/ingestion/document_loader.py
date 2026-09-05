@@ -49,6 +49,7 @@ def load_documents(directory: Path = None) -> List[Document]:
         glob="*.pdf",
         loader_cls=PyPDFLoader,
         show_progress=False,
+        use_multithreading=True # To speed up the document loading process
     )
     documents = loader.load()
 

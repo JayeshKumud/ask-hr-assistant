@@ -21,21 +21,104 @@ scores ADD together. Everything is re-sorted by that combined score. A
 document ranked #1 by both retrievers gets a strong combined boost; a
 document only one retriever found still competes, just weighted by that
 retriever's configured weight and how high it ranked.
+
+BM25 INDEX PERSISTENCE — how the "cold start" cost is minimized:
+BM25Retriever needs the full text corpus in memory to build its keyword
+index (unlike Chroma, it has no on-disk index format of its own).
+Previously, this index was rebuilt from scratch on every cold start
+(first query after a restart) by fetching every chunk back out of
+Chroma via vsm.get_all_documents() and re-tokenizing the whole corpus.
+
+Now, the index is built ONCE during ingestion (see
+core/pipeline.py's ingest_documents(), which calls persist_bm25_index()
+right after chunking — using the SAME documents list that's about to be
+embedded and stored in Chroma, no round-trip needed) and pickled to
+settings.bm25_index_path. build_hybrid_retriever() below tries to load
+that pickle first; rebuilding from Chroma only happens as a FALLBACK,
+for cases like the very first run before any ingestion has happened, or
+if the pickle file is missing/corrupted.
 """
+import logging
+import pickle
+from pathlib import Path
+from typing import List, Optional
+
 from langchain_classic.retrievers import EnsembleRetriever
 from langchain_community.retrievers import BM25Retriever
+from langchain_core.documents import Document
 
 from askhr.core.config import settings
 from askhr.processing.vector_store import VectorStoreManager
 
+logger = logging.getLogger(__name__)
 
-from typing import Optional
 
-from langchain_classic.retrievers import EnsembleRetriever
-from langchain_community.retrievers import BM25Retriever
+def _build_bm25_retriever(documents: List[Document]) -> BM25Retriever:
+    """
+    Builds a BM25Retriever from an in-memory list of Documents. This is
+    the one place the actual tokenizing/indexing happens — factored out
+    so both the ingestion-time build (persist_bm25_index) and the
+    retrieval-time fallback (build_hybrid_retriever, when no pickle
+    exists yet) share the exact same construction logic.
+    """
+    return BM25Retriever.from_documents(documents)
 
-from askhr.core.config import settings
-from askhr.processing.vector_store import VectorStoreManager
+
+def persist_bm25_index(documents: List[Document], path: Path) -> None:
+    """
+    Builds a BM25 index from `documents` and pickles it to `path`.
+
+    Called from core/pipeline.py's ingest_documents(), right after
+    chunking and BEFORE (or alongside) storing those same chunks in
+    Chroma — so this reuses the in-memory chunks list directly, with no
+    need to read anything back out of the vector store.
+
+    Overwrites any previously-persisted index at `path`, so a re-ingest
+    always leaves behind a pickle that matches the newly-ingested
+    corpus, never a stale one from a previous run.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    bm25_retriever = _build_bm25_retriever(documents)
+
+    with open(path, "wb") as f:
+        pickle.dump(bm25_retriever, f)
+
+    logger.info("Persisted BM25 index (%d documents) to %s", len(documents), path)
+
+
+def _load_bm25_index(path: Path) -> Optional[BM25Retriever]:
+    """
+    Attempts to load a previously-persisted BM25 index from `path`.
+
+    Returns None (rather than raising) whenever loading isn't possible —
+    the file doesn't exist yet (e.g. no ingestion has ever run in this
+    environment), or the pickle is corrupted/unreadable (e.g. it was
+    built with a different, incompatible library version — pickles are
+    tied to the exact class definitions that existed when they were
+    written). Callers are expected to fall back to rebuilding from
+    Chroma in either case, rather than crashing.
+    """
+    if not path.exists():
+        return None
+
+    try:
+        with open(path, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        # Broad except is deliberate here: pickle can fail in several
+        # different ways (corrupted file, version mismatch between the
+        # environment that wrote it and this one, etc.), and every one
+        # of them should be treated identically — log it, return None,
+        # let the caller fall back to rebuilding. A cache that can't be
+        # trusted should never be allowed to crash the request.
+        logger.warning(
+            "Failed to load persisted BM25 index from %s — will rebuild "
+            "from the vector store instead.",
+            path,
+            exc_info=True,
+        )
+        return None
 
 
 def build_hybrid_retriever(vsm: VectorStoreManager, k: Optional[int] = None) -> EnsembleRetriever:
@@ -50,17 +133,26 @@ def build_hybrid_retriever(vsm: VectorStoreManager, k: Optional[int] = None) -> 
             passes settings.rerank_candidate_k here instead, to fetch a
             wider candidate pool for the cross-encoder to narrow down.
 
-    BM25Retriever is rebuilt from vsm.get_all_documents() each time this
-    is called, rather than persisted — BM25 has no on-disk index of its
-    own in this setup, so it always reflects the current contents of
-    Chroma. For a small policy-document corpus like this one, rebuilding
-    it per query is cheap; if the corpus grows much larger, this would be
-    worth caching instead of rebuilding every call.
+    BM25's index is loaded from the pickle written during the last
+    ingestion (see module docstring above). If no pickle exists yet —
+    e.g. this environment has never run ingestion — this falls back to
+    the slower path of rebuilding it from vsm.get_all_documents(), same
+    as before this change, so retrieval still works even without a
+    persisted index; it's just not the fast path.
     """
     k = k or settings.top_k
-    documents = vsm.get_all_documents()
 
-    bm25_retriever = BM25Retriever.from_documents(documents)
+    bm25_retriever = _load_bm25_index(settings.bm25_index_path)
+    if bm25_retriever is None:
+        logger.info(
+            "No persisted BM25 index at %s — building it from the vector "
+            "store now (slower; this should only happen once per "
+            "environment, before the first ingestion writes the pickle).",
+            settings.bm25_index_path,
+        )
+        documents = vsm.get_all_documents()
+        bm25_retriever = _build_bm25_retriever(documents)
+
     bm25_retriever.k = k
 
     vector_retriever = vsm.as_retriever(k=k)
@@ -88,9 +180,7 @@ if __name__ == "__main__":
     # This uses the REAL configured embedding model (not a fake one) —
     # it needs network access on first run to download the model from
     # HuggingFace, same as ingest_documents() does. Run with:
-    #   python -m search.hybrid_retriever
-    from langchain_core.documents import Document
-
+    #   uv run python -m askhr.search.hybrid_retriever
     sample_docs = [
         Document(
             page_content=(

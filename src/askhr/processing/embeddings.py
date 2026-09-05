@@ -34,5 +34,12 @@ def build_embedding_function() -> HuggingFaceEmbeddings:
     """
     return HuggingFaceEmbeddings(
         model_name=settings.embedding_model,
-        model_kwargs={"trust_remote_code": True},
+        model_kwargs={
+            "trust_remote_code": True,
+            "device": "cpu", # Fast if GPU available; on CPU-only, batching alone still helps somewhat.
+        },
+        encode_kwargs={
+            "batch_size": 8,
+            "normalize_embeddings": True,
+        },
     )

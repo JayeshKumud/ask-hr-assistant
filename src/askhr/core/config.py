@@ -49,6 +49,17 @@ class Settings:
     # chunked, and indexed. Replaces the old URL-list approach.
     policies_dir: Path = PROJECT_ROOT / os.getenv("POLICIES_DIR", "resources/policies")
 
+    # --- BM25 index persistence ---
+    # Where the pre-built BM25 keyword index is pickled to during
+    # ingestion, and loaded from at query time. Kept alongside the
+    # vector store's own persisted data rather than inside it — BM25's
+    # index format has nothing to do with Chroma's, they just happen to
+    # both be "search index" artifacts of the same ingestion run.
+    # See search/hybrid_retriever.py for how this file gets written
+    # (during ingestion) and read (during retrieval, with a fallback to
+    # rebuilding from Chroma if this file doesn't exist yet).
+    bm25_index_path: Path = PROJECT_ROOT / os.getenv("BM25_INDEX_PATH", "resources/vectorstore/bm25_index.pkl")
+
     # --- Retrieval / QA ---
     top_k: int = int(os.getenv("TOP_K", "3"))
     max_tokens_limit: int = int(os.getenv("MAX_TOKENS_LIMIT", "8000"))
@@ -72,7 +83,7 @@ class Settings:
     # re-ranks and narrows them down to top_k for the final prompt. This
     # must be wider than top_k, or there's nothing for the re-ranker to
     # actually narrow — re-ranking 5 candidates down to 5 does nothing.
-    rerank_candidate_k: int = int(os.getenv("RERANK_CANDIDATE_K", "15"))
+    rerank_candidate_k: int = int(os.getenv("RERANK_CANDIDATE_K", "10"))
 
 
 settings = Settings()

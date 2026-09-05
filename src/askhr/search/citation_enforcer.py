@@ -57,7 +57,24 @@ def _is_supported(llm, query: str, answer: str, citations: List[Citation]) -> bo
         context=_build_context(citations), answer=answer
     )
     response = llm.invoke(prompt)
-    verdict_line = response.content.strip().splitlines()[0].strip().upper()
+    content = (response.content or "").strip()
+
+    # Some models in the fallback chain (llm_wrappers.py) occasionally
+    # return an empty string for a short verification-style prompt —
+    # observed with the reasoning_format="hidden" Groq/Qwen setting in
+    # particular. Previously this crashed with IndexError on
+    # splitlines()[0] before ever reaching the "unexpected format ->
+    # treat as unsupported" fallback below. Handle it as the same kind
+    # of ambiguity: log it and refuse, rather than letting an empty
+    # response take down the whole request.
+    if not content:
+        logger.warning(
+            "Empty verification response for query %r — treating as unsupported.",
+            query,
+        )
+        return False
+
+    verdict_line = content.splitlines()[0].strip().upper()
 
     logger.info("Citation verification verdict for query %r: %r", query, verdict_line)
 
@@ -107,19 +124,22 @@ def enforce_citations(llm, query: str, answer: str, citations: List[Citation]) -
 if __name__ == "__main__":
     # Manual check with a fake LLM — no network or real API key needed,
     # just confirms the parsing and both refusal paths behave correctly.
+    class FakeResponse:
+        """Mimics the .content attribute shape of a real LLM response."""
+
+        def __init__(self, content: str):
+            self.content = content
+
+
     class FakeLLM:
         """Returns a fixed response regardless of the prompt, for testing."""
 
         def __init__(self, canned_response: str):
             self._canned_response = canned_response
 
-        def invoke(self, prompt: str):
-            class _Response:
-                pass
+        def invoke(self, prompt: str) -> FakeResponse:
+            return FakeResponse(self._canned_response)
 
-            r = _Response()
-            r.content = self._canned_response
-            return r
 
     sample_citations = [
         Citation(
@@ -129,31 +149,31 @@ if __name__ == "__main__":
     ]
 
     # Case 1: no citations at all.
-    answer, cites = enforce_citations(
+    no_citation_answer, no_citation_cites = enforce_citations(
         FakeLLM("SUPPORTED\nirrelevant, won't be called"), "some query", "some answer", []
     )
     print("No citations case:")
-    print(f"  answer: {answer[:60]}...")
-    print(f"  citations: {cites}")
+    print(f"  answer: {no_citation_answer[:60]}...")
+    print(f"  citations: {no_citation_cites}")
 
     # Case 2: citations exist, verifier says supported.
-    answer, cites = enforce_citations(
+    supported_answer, supported_cites = enforce_citations(
         FakeLLM("SUPPORTED\nThe answer matches the excerpt exactly."),
         "How many leave days?",
         "Full-time employees receive 25 working days of annual leave.",
         sample_citations,
     )
     print("\nSupported case:")
-    print(f"  answer: {answer}")
-    print(f"  citations: {len(cites)}")
+    print(f"  answer: {supported_answer}")
+    print(f"  citations: {len(supported_cites)}")
 
     # Case 3: citations exist, verifier says NOT supported.
-    answer, cites = enforce_citations(
+    unsupported_answer, unsupported_cites = enforce_citations(
         FakeLLM("NOT_SUPPORTED\nThe answer claims 30 days, excerpt says 25."),
         "How many leave days?",
         "Employees receive 30 working days of annual leave.",  # deliberately wrong
         sample_citations,
     )
     print("\nUnsupported case:")
-    print(f"  answer: {answer[:60]}...")
-    print(f"  citations returned: {len(cites)} (should still be 1, for transparency)")
+    print(f"  answer: {unsupported_answer[:60]}...")
+    print(f"  citations returned: {len(unsupported_cites)} (should still be 1, for transparency)")
