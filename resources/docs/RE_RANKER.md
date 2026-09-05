@@ -2,7 +2,7 @@
 
 What re-ranking is, why hybrid retrieval's own ranking isn't enough on
 its own, its objective, and how it helps — covering
-`src/search/reranker.py` and how it builds on hybrid retrieval.
+`src/askhr/search/reranker.py` and how it builds on hybrid retrieval.
 
 ## Objective
 
@@ -120,13 +120,13 @@ rankings, is the entire value re-ranking adds.
 ## Testing this module
 
 ```
-python -m search.reranker
+uv run python -m askhr.search.reranker
 ```
 
 Runs instantly, fully offline (`FakeCrossEncoder`) — confirms the
 retrieve → compress → return wiring.
 
-To see the **real** cross-encoder model, run `python -m core.pipeline`
+To see the **real** cross-encoder model, run `uv run python -m askhr.core.pipeline`
 instead — exercises `build_reranking_retriever()` for real via
 `qa_chain.py`, downloading `cross-encoder/ms-marco-MiniLM-L-6-v2` on
 first use.

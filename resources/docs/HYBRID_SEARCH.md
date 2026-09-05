@@ -1,7 +1,7 @@
 # Hybrid Search
 
 What hybrid retrieval is, why it's needed, its objective, and exactly
-how it works in this project — covering `src/search/hybrid_retriever.py`
+how it works in this project — covering `src/askhr/search/hybrid_retriever.py`
 and its role in the broader retrieval pipeline (`qa_chain.py`,
 `reranker.py`).
 
@@ -58,14 +58,64 @@ found still competes, weighted by that retriever's configured importance
 and how highly it ranked.
 
 ### Where BM25's index comes from
-Unlike Chroma, BM25 has no on-disk persisted index in this system.
-`build_hybrid_retriever()` calls `VectorStoreManager.get_all_documents()`
-— which reads every chunk currently stored in Chroma back out — and
-builds a fresh in-memory `BM25Retriever` from that list on every call.
-This means BM25 always reflects whatever's actually in the vector store
-right now; it can never silently drift out of sync after a re-ingestion.
-The tradeoff is rebuilding the index on every query — negligible for a
-handful of policy PDFs, worth caching if the corpus grew much larger.
+
+Unlike Chroma, BM25 has no on-disk index format of its own — LangChain's
+`BM25Retriever` is a pure in-memory wrapper around `rank_bm25`, which
+needs the full text corpus available to build its term-frequency
+statistics.
+
+**This used to be rebuilt from Chroma on every cold start.**
+`build_hybrid_retriever()` would call
+`VectorStoreManager.get_all_documents()` — reading every chunk currently
+stored in Chroma back out — and build a fresh in-memory `BM25Retriever`
+from that list. Combined with `RAGPipeline`'s chain caching (see
+`ARCHITECTURE.md`), this meant the cost was paid once per process
+lifetime rather than once per query — but that "once" still happened on
+whichever user's request triggered the first build after every app
+restart, and it scaled with corpus size (more text to tokenize and index
+= longer rebuild).
+
+**Now, the index is built once during ingestion and persisted to disk.**
+`ingest_documents()` (in `core/pipeline.py`) calls
+`persist_bm25_index(docs, settings.bm25_index_path)` right after
+chunking — using the exact same in-memory `docs` list that's about to be
+embedded into Chroma, with no need to read anything back out of the
+vector store. That pickled index is then loaded by
+`build_hybrid_retriever()` on the next cold start, via `_load_bm25_index()`:
+
+```python
+bm25_retriever = _load_bm25_index(settings.bm25_index_path)
+if bm25_retriever is None:
+    # fallback: no persisted index found (e.g. first-ever run before
+    # any ingestion, or a corrupted/incompatible pickle) — rebuild the
+    # old way, from whatever's currently in Chroma
+    documents = vsm.get_all_documents()
+    bm25_retriever = _build_bm25_retriever(documents)
+```
+
+**What this does and doesn't solve.** Loading a pickle is dominated by
+disk I/O + deserialization, not the tokenize/index-build computation
+that dominates a from-scratch rebuild — so this meaningfully shrinks the
+cold-start cost. It does **not** eliminate cold start entirely (the very
+first load after any restart still reads and deserializes the pickle,
+and cross-encoder/embedding model loading elsewhere in the chain has
+its own, smaller first-use cost). It also does **not** address two
+separate concerns that only matter at larger scale: `rank_bm25` still
+holds the entire index in memory (pickling changes how fast it loads,
+not how much RAM it occupies once loaded), and it still scores every
+query via a linear scan across the whole corpus regardless of how the
+index was built. If either of those becomes a real bottleneck — a much
+larger corpus, or multiple serving replicas each duplicating the same
+in-memory index — the next step is migrating keyword search to a
+genuinely disk-backed, sub-linear index (Postgres full-text search or a
+dedicated search engine like Elasticsearch/OpenSearch), not further
+tuning of the pickle approach.
+
+**Overwriting behavior:** a re-ingestion always overwrites the pickle
+with a fresh index built from the newly-ingested corpus — there's no
+scenario where a re-index leaves a stale pickle behind, since
+`persist_bm25_index()` runs unconditionally as part of
+`ingest_documents()`, before the old data is even replaced in Chroma.
 
 ### Configuration
 ```python
@@ -106,7 +156,7 @@ of question is coming.
 ## Testing this module
 
 ```
-python -m search.hybrid_retriever
+uv run python -m askhr.search.hybrid_retriever
 ```
 
 Demonstrates both query types side by side — BM25 alone, vector alone,

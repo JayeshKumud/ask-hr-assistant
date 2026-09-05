@@ -16,6 +16,12 @@ Triggered by: clicking **Index Policy Documents** in the Streamlit sidebar.
      this is a full replace, not an incremental append)
       |
       v
+  1b. Invalidate the cached retrieval chain
+     (RAGPipeline._qa_chain = None -- done BEFORE loading starts, so if
+     ingestion fails partway through, the next query fails loudly rather
+     than silently serving a stale pre-reset chain)
+      |
+      v
   2. Load every PDF under resources/policies/
      (ingestion.document_loader.load_documents() -- LangChain's
      DirectoryLoader + PyPDFLoader; one Document per PAGE, with
@@ -28,7 +34,15 @@ Triggered by: clicking **Index Policy Documents** in the Streamlit sidebar.
      chunk, tracking its position within its source page)
       |
       v
-  4. Embed each chunk and store it
+  4. Build + persist the BM25 keyword index
+     (search.hybrid_retriever.persist_bm25_index() -- builds a
+     BM25Retriever directly from the SAME in-memory chunk list from
+     step 3, no round-trip through Chroma, and pickles it to
+     settings.bm25_index_path. See HYBRID_SEARCH.md for why this moved
+     here instead of being rebuilt lazily at query time.)
+      |
+      v
+  5. Embed each chunk and store it
      (processing.vector_store.VectorStoreManager.add_documents() --
      HuggingFace embedding model, stored in Chroma, persisted to disk
      under resources/vectorstore/, each chunk given a fresh UUID)
@@ -43,9 +57,16 @@ current set of policy PDFs into a fresh index", not an incremental
 append — re-running ingestion replaces the previous contents rather than
 adding to them.
 
-**Why BM25 needs nothing done at ingestion time**: unlike Chroma, BM25
-has no persisted index — it's rebuilt from whatever's in Chroma on
-demand, at query time (see `HYBRID_SEARCH.md`). Nothing to update here.
+**Why BM25's index is now built here, at ingestion time**: previously,
+BM25 had nothing done at ingestion time — it was rebuilt lazily, from
+whatever was in Chroma, the first time a query needed it after a
+restart. That approach was correct but wasteful: it required fetching
+every chunk back out of Chroma and re-tokenizing the whole corpus on the
+user-facing request path. Building it here instead — from the chunk list
+ingestion already has in hand — means that cost is paid during an
+operation the user already expects to wait on, not hidden inside the
+first question asked after a restart. See `HYBRID_SEARCH.md` for the
+full before/after and what this optimization does and doesn't solve.
 
 ## 2. Answering a query — `pipeline.generate_answer(query)`
 
@@ -59,17 +80,24 @@ Triggered by: typing into the GUI's question box.
      initialized/populated yet (ingest_documents() was never called)
       |
       v
-  2. Build the QA chain for this query
-     (search.qa_chain.build_qa_chain() -- wires together the LLM, the
-     re-ranking retriever, and the main prompt templates)
+  2. Get the QA chain for this query — CACHED, not rebuilt per call
+     (RAGPipeline.qa_chain property -- builds the chain via
+     search.qa_chain.build_qa_chain() only the FIRST time it's accessed
+     after startup or after a re-index; every subsequent query in the
+     same process just reuses the already-built chain. Before this
+     caching was added, this step rebuilt the entire retrieval chain --
+     hybrid retriever, cross-encoder, everything -- from scratch on
+     every single query. See ARCHITECTURE.md's "Key design decisions"
+     for the full before/after.)
       |
       v
   3. RETRIEVAL: hybrid retrieval fetches a WIDE candidate pool
      (search.hybrid_retriever.build_hybrid_retriever(), k =
      settings.rerank_candidate_k -- runs BM25 keyword search AND vector
      semantic search on every query, unconditionally, then fuses the two
-     ranked lists via weighted Reciprocal Rank Fusion. See
-     HYBRID_SEARCH.md for the full mechanism.)
+     ranked lists via weighted Reciprocal Rank Fusion. BM25's index
+     itself is loaded from a pickle persisted at ingestion time, not
+     rebuilt here -- see HYBRID_SEARCH.md for the full mechanism.)
       |
       v
   4. RE-RANKING: cross-encoder narrows the pool down
@@ -82,7 +110,8 @@ Triggered by: typing into the GUI's question box.
   5. GENERATION: the narrowed chunks + query go to the LLM
      (formatted via EXAMPLE_PROMPT per chunk, combined into PROMPT's
      {summaries} slot, sent to the Groq-hosted model per
-     settings.llm_model)
+     settings.llm_model, with a fallback chain to other models on
+     rate-limit/failure -- see core/llm_wrappers.py)
       |
       v
   6. Extract citations from what was actually retrieved
@@ -98,7 +127,10 @@ Triggered by: typing into the GUI's question box.
      retrieved at all, refuses immediately with no verification call
      needed. If citations exist but aren't judged supportive, replaces
      the answer with a refusal -- but still returns the citations found,
-     so the user can review them.)
+     so the user can review them. If the verification call itself
+     returns an empty response -- observed occasionally with certain
+     reasoning-model configurations -- this is treated as "unsupported"
+     rather than crashing.)
       |
       v
   Returns (answer: str, citations: List[Citation])
@@ -114,7 +146,7 @@ verification), sometimes effectively a 3rd (re-ranking's cross-encoder
 model runs locally, not an LLM call, but adds its own latency). This is
 a deliberate accuracy-over-cost tradeoff.
 
-## 3. Offline evaluation — `python -m eval.evaluate_faithfulness`
+## 3. Offline evaluation — `uv run python -m askhr.eval.evaluate_faithfulness`
 
 Triggered manually (eventually: by CI, on each pull request — not wired
 up yet).
@@ -158,11 +190,15 @@ not something that runs for every user's question.
 
 ## How the GUI drives all of this
 
-`src/gui/main.py` wraps one `RAGPipeline` instance in `st.cache_resource`.
+`src/askhr/gui/main.py` depends on `PolicyQAService`
+(`askhr.service.policy_qa_service`), wrapped in `st.cache_resource`.
 Streamlit re-executes the *entire* script on every interaction — without
-that cache, ingestion would need to be redone from scratch before every
-single question. The cache is what lets "index once, ask many questions"
-work as expected, and it's also why the persisted Chroma files under
-`resources/vectorstore/` survive app restarts even though the in-memory
-pipeline instance doesn't (BM25's index, having no persistence of its
-own, gets rebuilt from Chroma automatically on the next query either way).
+that cache, both the pipeline and its cached retrieval chain would need
+to be rebuilt before every single question. The cache is what lets
+"index once, ask many questions" work as expected. The persisted Chroma
+files and the persisted BM25 pickle under `resources/vectorstore/` both
+survive app restarts even though the in-memory pipeline instance
+doesn't — on the next process start, the first query loads the BM25
+pickle (fast) rather than rebuilding it from Chroma (slow, and only used
+as a fallback if the pickle is missing or unreadable — see
+`HYBRID_SEARCH.md`).
